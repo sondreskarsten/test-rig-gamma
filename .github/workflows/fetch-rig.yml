@@ -1,0 +1,58 @@
+name: fetch-rig
+on:
+  workflow_dispatch:
+    inputs:
+      batch_ref:
+        description: 'batch file sha/marker (informational)'
+        default: 'current'
+jobs:
+  fetch:
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: fetch shard
+        env:
+          SHARD: ${{ matrix.shard }}
+        run: |
+          python3 - <<'PY'
+          import os, json, time, urllib.request, hashlib, pathlib
+          from concurrent.futures import ThreadPoolExecutor
+          shard=int(os.environ["SHARD"])
+          ip=urllib.request.urlopen("https://api.ipify.org",timeout=15).read().decode()
+          bf=pathlib.Path("batch/current.tsv")
+          if not bf.exists(): print("no batch file"); raise SystemExit(0)
+          # each line: orgnr \t dato \t kid ; shard by kid last 2 digits % 20
+          rows=[]
+          for line in bf.read_text().splitlines():
+              if not line.strip(): continue
+              o,d,k=line.split("\t")
+              if int(k[-2:])%20==shard: rows.append((o,d,k))
+          print(f"shard {shard} ip={ip} rows={len(rows)} CONC=16")
+          outdir=pathlib.Path(f"out/shard_{shard}"); outdir.mkdir(parents=True,exist_ok=True)
+          BASE="https://w2.brreg.no/kunngjoring/hent_en.jsp"
+          def fetch(row):
+              o,d,k=row; url=f"{BASE}?kid={k}&sokeverdi={o}&spraak=nb"; t0=time.time()
+              try: body=urllib.request.urlopen(url,timeout=25).read()
+              except Exception as e: return {"kid":k,"verdict":"error","err":str(e)[:50],"ip":ip}
+              dt=round(time.time()-t0,3); size=len(body)
+              is_err=b"Det har oppst" in body or b"igjen senere" in body
+              if size<=26200 or is_err or k.encode() not in body:
+                  return {"kid":k,"verdict":"shell","size":size,"ip":ip,"dt":dt}
+              (outdir/f"{o}-{d}-{k}.html").write_bytes(body)
+              return {"kid":k,"verdict":"ok","size":size,"sha256":hashlib.sha256(body).hexdigest(),"ip":ip,"dt":dt}
+          with ThreadPoolExecutor(max_workers=16) as ex:
+              man=list(ex.map(fetch, rows))
+          ok=sum(1 for m in man if m['verdict']=='ok'); shell=sum(1 for m in man if m['verdict']=='shell'); err=sum(1 for m in man if m['verdict']=='error')
+          (outdir/"_manifest.jsonl").write_text("\n".join(json.dumps(m) for m in man))
+          (outdir/"_meta.json").write_text(json.dumps({"shard":shard,"runner_ip":ip,"processed":len(rows),"ok":ok,"shell":shell,"err":err}))
+          print(f"shard {shard} DONE ip={ip} ok={ok} shell={shell} err={err}")
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fetch-shard-${{ matrix.shard }}
+          path: out/shard_${{ matrix.shard }}
+          retention-days: 90
