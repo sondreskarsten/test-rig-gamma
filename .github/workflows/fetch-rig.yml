@@ -3,8 +3,11 @@ on:
   workflow_dispatch:
     inputs:
       batch_ref:
-        description: 'batch file sha/marker (informational)'
+        description: 'unique batch marker (also names the artifacts)'
         default: 'current'
+      batch_file:
+        description: 'batch file to read (per-run, enables concurrency)'
+        default: 'batch/current.tsv'
 jobs:
   fetch:
     strategy:
@@ -17,15 +20,15 @@ jobs:
       - name: fetch shard
         env:
           SHARD: ${{ matrix.shard }}
+          BATCH_FILE: ${{ github.event.inputs.batch_file }}
         run: |
           python3 - <<'PY'
           import os, json, time, urllib.request, hashlib, pathlib
           from concurrent.futures import ThreadPoolExecutor
           shard=int(os.environ["SHARD"])
           ip=urllib.request.urlopen("https://api.ipify.org",timeout=15).read().decode()
-          bf=pathlib.Path("batch/current.tsv")
+          bf=pathlib.Path(os.environ.get("BATCH_FILE") or "batch/current.tsv")
           if not bf.exists(): print("no batch file"); raise SystemExit(0)
-          # each line: orgnr \t dato \t kid ; shard by kid last 2 digits % 20
           rows=[]
           for line in bf.read_text().splitlines():
               if not line.strip(): continue
@@ -52,7 +55,8 @@ jobs:
           print(f"shard {shard} DONE ip={ip} ok={ok} shell={shell} err={err}")
           PY
       - uses: actions/upload-artifact@v4
+        if: ${{ hashFiles(format('out/shard_{0}/**', matrix.shard)) != '' }}
         with:
-          name: fetch-shard-${{ matrix.shard }}
+          name: fetch-${{ github.event.inputs.batch_ref }}-shard-${{ matrix.shard }}
           path: out/shard_${{ matrix.shard }}
           retention-days: 90
