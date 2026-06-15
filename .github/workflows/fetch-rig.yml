@@ -13,7 +13,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19]
+        shard: [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -33,7 +33,7 @@ jobs:
           for line in bf.read_text().splitlines():
               if not line.strip(): continue
               o,d,k=line.split("\t")
-              if int(k[-2:])%20==shard: rows.append((o,d,k))
+              if int(k[-2:])%40==shard: rows.append((o,d,k))
           print(f"shard {shard} ip={ip} rows={len(rows)} CONC=16")
           outdir=pathlib.Path(f"out/shard_{shard}"); outdir.mkdir(parents=True,exist_ok=True)
           BASE="https://w2.brreg.no/kunngjoring/hent_en.jsp"
